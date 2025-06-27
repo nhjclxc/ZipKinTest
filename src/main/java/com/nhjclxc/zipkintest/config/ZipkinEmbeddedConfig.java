@@ -1,16 +1,22 @@
 package com.nhjclxc.zipkintest.config;
 
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.annotation.Bean;
 import org.springframework.core.annotation.Order;
+import org.springframework.context.ApplicationListener;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.web.client.RestTemplate;
+import lombok.extern.slf4j.Slf4j;
 
-import java.io.BufferedReader;
 import java.io.File;
+import java.lang.ProcessBuilder;
+import java.lang.Process;
+import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.Socket;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -31,12 +37,30 @@ public class ZipkinEmbeddedConfig implements CommandLineRunner, ApplicationListe
 
     @Value("${zipkin.embedded.enabled}")
     private Boolean enabled;
+
+    // 添加启动完成标志
+    private static volatile boolean zipkinReady = false;
+
+    /**
+     * 配置RestTemplate Bean，用于Sleuth发送数据到Zipkin
+     */
+    @Bean
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
+    }
+
+    /**
+     * 检查Zipkin是否已就绪
+     */
+    public static boolean isZipkinReady() {
+        return zipkinReady;
+    }
+
     @Override
     @Order(1) // 优先启动
     public void run(String... args) throws Exception {
         log.info("=== ZipkinEmbeddedConfig 开始执行 ===");
-        String projectDir = System.getProperty("user.dir");
-        log.info("当前工作目录: {}", projectDir);
+        log.info("当前工作目录: {}", System.getProperty("user.dir"));
         log.info("Java版本: {}", System.getProperty("java.version"));
         log.info("Java路径: {}", System.getProperty("java.home"));
 
@@ -46,18 +70,21 @@ public class ZipkinEmbeddedConfig implements CommandLineRunner, ApplicationListe
             return;
         }
 
-        startZipkinServer(projectDir);
+        startZipkinServer();
     }
 
     /**
      * 启动Zipkin服务
      */
-    private void startZipkinServer(String projectDir) {
+    private void startZipkinServer() {
         try {
             log.info("=== 开始启动内嵌Zipkin服务 ===");
 
             // 获取zipkin.jar的路径
-            String zipkinJarPath = projectDir + File.separator + "libs" + File.separator + "zipkin.jar";
+            String projectDir = System.getProperty("user.dir");
+            String zipkinJarPath = projectDir + File.separator + "lib" + File.separator + "zipkin.jar";
+
+            log.info("项目目录: {}", projectDir);
             log.info("Zipkin JAR路径: {}", zipkinJarPath);
 
             File zipkinJar = new File(zipkinJarPath);
@@ -83,9 +110,9 @@ public class ZipkinEmbeddedConfig implements CommandLineRunner, ApplicationListe
 
             // 构建启动命令
             String[] command = {
-                "java", "-jar", zipkinJarPath,
-                "--server.port=" + ZIPKIN_PORT,
-                "--logging.level.zipkin=INFO"
+                    "java", "-jar", zipkinJarPath,
+                    "--server.port=" + ZIPKIN_PORT,
+                    "--logging.level.zipkin=INFO"
             };
 
             log.info("启动命令: {}", String.join(" ", command));
@@ -111,6 +138,9 @@ public class ZipkinEmbeddedConfig implements CommandLineRunner, ApplicationListe
             if (waitForZipkinStartup()) {
                 log.info("✅ Zipkin服务启动成功！");
                 log.info("访问地址: http://localhost:{}", ZIPKIN_PORT);
+                // 设置Zipkin就绪标志
+                zipkinReady = true;
+                log.info("✅ Zipkin就绪标志已设置，Sleuth可以开始发送数据");
             } else {
                 log.error("❌ Zipkin服务启动失败");
                 if (zipkinProcess != null) {
@@ -246,7 +276,10 @@ public class ZipkinEmbeddedConfig implements CommandLineRunner, ApplicationListe
                 BufferedReader reader = new BufferedReader(new InputStreamReader(zipkinProcess.getInputStream()));
                 String line;
                 while ((line = reader.readLine()) != null && !isShuttingDown.get()) {
-                    log.info("Zipkin输出: {}", line);
+                    // 只记录重要的启动信息，过滤掉重复的日志
+                    if (line.contains("Started") || line.contains("Serving HTTP") || line.contains("ERROR") || line.contains("WARN")) {
+                        log.info("Zipkin: {}", line);
+                    }
                 }
             } catch (Exception e) {
                 if (!isShuttingDown.get()) {
@@ -263,7 +296,10 @@ public class ZipkinEmbeddedConfig implements CommandLineRunner, ApplicationListe
                 BufferedReader reader = new BufferedReader(new InputStreamReader(zipkinProcess.getErrorStream()));
                 String line;
                 while ((line = reader.readLine()) != null && !isShuttingDown.get()) {
-                    log.error("Zipkin错误: {}", line);
+                    // 只记录错误信息
+                    if (line.contains("ERROR") || line.contains("Exception") || line.contains("Failed")) {
+                        log.error("Zipkin错误: {}", line);
+                    }
                 }
             } catch (Exception e) {
                 if (!isShuttingDown.get()) {
@@ -317,6 +353,8 @@ public class ZipkinEmbeddedConfig implements CommandLineRunner, ApplicationListe
     public void onApplicationEvent(ContextClosedEvent event) {
         log.info("=== 应用关闭，停止Zipkin服务 ===");
         isShuttingDown.set(true);
+        // 重置Zipkin就绪标志
+        zipkinReady = false;
         stopZipkinServer();
     }
 

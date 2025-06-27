@@ -79,6 +79,12 @@
             <version>2.16.3</version>
         </dependency>
 
+        <!-- Zipkin集成依赖 - 这是关键！ -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-sleuth-zipkin</artifactId>
+            <version>3.0.3</version>
+        </dependency>
 
 
 
