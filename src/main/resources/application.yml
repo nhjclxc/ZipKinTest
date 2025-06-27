@@ -1,0 +1,31 @@
+
+spring:
+  application:
+    name: ZipKinTest
+  # 链路追踪配置
+  sleuth:
+    sampler:
+      probability: 0.1  # 采样率，生产环境10%采样，减少性能影响
+    web:
+      client:
+        enabled: true
+    messaging:
+      enabled: true
+    redis:
+      enabled: true
+    jdbc:
+      enabled: true
+    propagation:
+      type: B3  # 使用B3传播格式
+  # Zipkin配置
+  zipkin:
+    base-url: http://localhost:9411
+    sender:
+      type: web
+
+
+# 链路追踪配置
+zipkin:
+  embedded:
+    enabled: false  # 生产环境启用内嵌Zipkin
+  base-url: http://127.0.0.1/zipkin/  # 使用Nginx代理地址，改为HTTPS
